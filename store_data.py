@@ -6,6 +6,14 @@ Write a client library that will interact with the server and allow the user to
 store and retrieve arbitrary amounts of data.
 """
 ############ This is a black box  ###############
+"""
+This is actually used in real systems:
+
+Write-once storage (logs, backups) — just keep bumping the pointer
+PostgreSQL WAL (Write-Ahead Log) — append only, never deletes mid-log
+Memory arenas in game engines — allocate fast, free everything at once at the end
+
+"""
 class Server:
     # Assume this is a blackbox server that can store up to 1MB of data. You can't modify this class.
     def __init__(self):
