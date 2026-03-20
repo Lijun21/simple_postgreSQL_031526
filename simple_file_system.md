@@ -137,14 +137,18 @@ File size max ~512KB, and so on.
 We call these regular data block used to store the second or third overflow as Double and Triple Indirect Blocks
 
 Now we can record large files, and not wasting space in the disk.
+```
 [Block Bitmap][Inode Bitmap][Inode Table][Data blocks...]
+```
 
 (what if file is super large? modern use ext4_extent_header, node in a b-tree ... revisit in the future)
 
 
 ## How to fix the performance degradation issue?
 As the disk size grow, we need more than one Inode Bitmaps, and Inode Tables, and all inodes are at the front the disk, data blocks at the back. Every file access require a long seek around the whole disk. 
+```
 [Block Bitmap][Inode Bitmap0][Inode Bitmap1][Inode Table0][Inode Table1][Data blocks...]
+```
 
 Bitmap blocks become too large, one bitmap couldn't fit in one block anymore.
 
@@ -376,20 +380,32 @@ Symbolic links (soft links) can be used to jump around directories.
 
 > This system we designed is called a **file system**.
 
+
+
+
+
 ## Fun things at the end to think about:
 why did I set the disk block size a 1KB, why not 1byte, why not 1GB? Modern HDD/SSD disk read/write unit size is 4KB, CPU MMU uses 4KB pages, do you know why they are the same?
-the block size can be set and reset on a new disk => format disk, reformat disk, haha
 
+the block size can be set and reset on a new disk => format disk, reformat disk, haha
+```
 mkfs.ext4 -b 4096 /dev/sda1   # format with 4KB blocks
 mkfs.ext4 -b 1024 /dev/sda1   # format with 1KB blocks
-
+```
 
 what if I store many many tiny files in the disk, what would happen? 
 inodes blocks are limited
 
 do you think bitmap is also data structure?
 
-> The directory is a file — but its inode has `file_type = directory`, not `file`.
+The directory is a file — but its inode has `file_type = directory`, not `file`.
+
+Base on what we designed, how it relate to open(), read(), write(), and close() system call?
+
+What methods/techniques Databases used to ensure ACID?
+
+
+
 
 ## How I structured this doc
 Problem encountered → add structure to solve it
@@ -400,7 +416,7 @@ Problem encountered → add structure to solve it
 | Can't find file by name | inode (metadata record) |
 | Can't find which inode to use | Inode Bitmap + Inode Table |
 | File too large for one block | Block pointers list in inode |
-| Inode can't hold enough block pointers | Indirect blocks (direct/indirect links) |
+| Inode can't hold enough block pointers | Indirect blocks |
 | Can't find bitmap/inode blocks | Group Descriptor Table |
 | Don't know disk-wide stats | Superblock |
 
