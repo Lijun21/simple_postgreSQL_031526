@@ -1,13 +1,13 @@
 
-Given a large empty array, size is 1MB, we call this a disk.
-we also have array of bytes, we call these files. 
-We need to desgin a system to store these files into disk and read them when needed.
+Given a large empty array, size 1MB, we call this a disk.
+we also have array of bytes, we call this a file. 
+We need to desgin a system to store a list of files into disk and read any file when needed.
 
 
 Frist file, 1KB binay file. ("a"*1024)
 
 ## Question1: Where to store it?
-Hint, the 1MB array have 1024 blocks, each block is 1KB. The read and write unit is 1KB. 
+Hint, the 1MB array(disk) have been evenly divided into 1024 blocks, so each block is 1KB. The read and write unit is 1KB. 
 index= [0,1,2,3,4..1023]
 disk = [0,0,0,0,0..0] = 1KB
 
@@ -15,7 +15,7 @@ Answer: Pick any random block, say #0 block, and write the file in it. That's it
 disk = ["a",0,0,0,0..0] = 1KB
 
 
-## Question2: another file 1KB("b"*1024), where to store it?
+## Question2: second file 1KB("b"*1024), where to store it?
 Now, if we pick #0 block again, the previous file would be overwritten, we need a way to know which blocks are empty. 
 
 We can scan the disk from 0 to 1023 blocks, find the first empty block.
@@ -99,28 +99,30 @@ if 1 block is not enough to store all inodes, we can use two or more blocks to s
 
 # How to store a file size 5kb?
 we need continuous blocks to store this large file, but when there are deleted blocks, it's hard to find a contiguous gap that fits. We can store in non-contiguous blocks, 
-in inode, we store all block indexes in block_number.
+in inode, typically has about 12-15 pointers, point to block numbers
+we call this first few blocks, Direct Blocks
 {
     file_name: "a_file" (4 bytes)
     created_at: "xxx" (4 bytes)
     file_size: "1KB" (4 bytes) 
-    block_number: "2" (4 bytes) -> "2, 4, 6 .." (8 * 4 bytes)
+    block_number: "2" (4 bytes) -> "2, 4, 6 .." (12 * 4 bytes = 48 bytes)
     name_length:"6 bytes" (4 bytes)
     ...
 }
 
 but each inode is 128 bytes, what if we need to store a 20KB file? do we really need to expand inode?
 
-Use the last entry to point to another block of indexes. Now, suddenly, 1024/4 = 256 block numbers can be stored, file size max ~256KB.
-This type of link is called single indirect link.
+When the direct blocks are full, use the last entry to point to another data block. Now, suddenly, 1024/4 = 256 block numbers can be stored, file size max ~256KB.
+We call the regular data block used to store the frist overflow of file, as Single Indirect Block, it contains a list of pointers to other data blocks.
 
-If the file is even larger, the last entry of that index block can point to yet another block of indexes.
+If the file is even larger, the last entry of that index block can point to yet another data block.
 File size max ~512KB, and so on.
-This type of link is called a double indirect link.
+We call these regular data block used to store the second or third overflow as Double and Triple Indirect Blocks
 
 Now we can record large files, and not wasting space in the disk.
 [Block Bitmap][Inode Bitmap][Inode Table][Data blocks...]
 
+(what if file is super large? modern use ext4_extent_header, node in a b-tree ... revisit in the future)
 
 
 # how to fix perfermance degraded issue?
@@ -227,20 +229,127 @@ any other better way? I want O(1) lookup time, no collisions, easy rename
 O(n/n) = O(1), scope the search all the way down to a group of size 1.
 Each "group" contains exactly 1 file = the file you already know you want.
 
-we need a method or technique to be able to find any inode in this system, 
-but doesn't require to visit every single inode in the disk
+we need a method to be able to find any file in this system, 
+but doesn't require to visit every single file in the system.
 
-A hierarchical tree, unify everything into one tree starting at root.
+in our current design, this is how we store and search for a file.
+Each file is stored in one or many data blocks, each data block have one block number, to avoid scan all data blocks for one file,
+we group data blocks together by data block numbers, create a name to represent all of them, file_name. 
+We store this relationship into a mapping {file_name: block_number1, block_number2} in a different block, inode_table block.
+so when we search, no longer need to search for all data blocks, but only the file_names. 
 
-Separate the file_name from inode. file_name would be stored and searched in tree structure, and inode stored and searched in linear structure.
+a 8K size file store in block size 1K disk, it takes 8 blocks. 
+data_blocks = disk[6,7,8,12,13,14,20,21]
+inode_block = disk[inode_table, 6,7,8,12,13,14,20,21] 
+we created extra data, array of bytes(file) to record this mapping, so search can be faster.
 
-continue tomorrow ...
+Our problem right now is we must scan all inode records(file_name:block_number) to find one file, to avoid scan all of them, we can group one or many inode record together(each inode record have one inode number) and create a new representative, name as directory. (follow this thinking process, we can create layers of representatives, directory inside of directory, subdirectory. )
+
+let's see how we implement it this time, 
+
+
+
+<!-- [{file_a: inode number a}, {file_b: inode number b}, {file_c: inode number c}], store into a block, directory root block. -->
+
+
+previous:
+large_disk = [inode_table_500_records, inode_table_500_records, inode_table_500_records]
+
+inode_table_500_records = a list of 
+{
+    created_at: "xxx" (4 bytes)
+    file_size: "1KB" (4 bytes)
+    file_permission: "xxx" (4 bytes)
+    block_number: "1", (4 bytes)
+    name_length:"6 bytes" (4 bytes)
+    file_name: "a_file" (6 bytes)
+    ...
+}
+
+group a list of inodes, give them a new name root directory 
+
+
+total 1500 inode table records, each with one inode number
+seperate file_name from inode table, create the mapping {file_name: inode number} store it into a block in disk directory_table, 
+
+/ -> [{file_name : inode_number 0-1500}]
+
+inside of root directory, if we store all 1500 files, that means we didn't improve the search at all, 
+to find one file, we need to find directory_table block, like we did with inode table, scan this all inodes.
+so must have more groups in side this root group, to split the entire orignial inodes up. 
+each directory group has a list of inodes with similar catogory.
+
+/ -> dir_1 -> [{file_name 1-150 : inode_number 0-150}]
+  -> dir_2 -> [{file_name 1-150 : inode_number 0-150}]
+  -> dir_3 -> [{file_name 1-150 : inode_number 0-150}]
+
+now to find one file, if you provide me which category of file you are looking for, start from root dir, "/dir_1/file_a.txt"
+I can frist find root dir, search inside for dir_1, then go to dir_1, search inside look for file_a.txt 
+walk down from the tree path.
+
+should we store the entries of directories in a dedicated block as directory_table, or combine it with inode_table?
+why did we create dedicated blocks for inode_table, and bitmaps, and group_descripter table and superblock?
+for fast allocation, 
+do we need directory to find file fast? yes, but not as important as find free blocks and free inode record spots, 
+inside one disk group, one inode_table to record all different types of blocks either for user pdf, video data or system/structure data, is good enough.
+
+"Everything is a file", this concepts is really cool.
+
+so instead of created dedicated block to store directory entries, we would store directory use regular data block, treat it the same as how we store regular file in disk. 
+inode_table, for root directory, /, always stored in inode#2, hardcoded on disk, easy to locate. 
+how to differenciate regular file to directory file then?
+in inode_table, update directory file type as directory. 
+
+{
+    created_at: "xxx" (4 bytes)
+    file_size: "1KB" (4 bytes)
+    file_permission: "xxx" (4 bytes)
+    block_number: "1", (4 bytes)
+    name_length:"6 bytes" (4 bytes) --removed
+    file_name: "a_file" (6 bytes) --removed
+    file_type: "file" -- updated to "directory"
+    ...
+}
+
+
+we unify everything into one tree.
+and the price we pay is, now to store and search for a file, not only just provide a name, but also how to walk down that tree, a path to the directory of the file. 
+
+file_name(in directory) would be stored and searched in tree structure, vs, 
+file_name in inode must be stored and searched in linear structure.
+
+This hierarchy tree structure, start from root we are able to find any file in the system,
+but doesn't require to visit every single file in the system.
 
 
 
 
 
+# how to nevigate inside this system? 
+Our current design, require use to find any file start from root directory.
+if we are deep in the directory tree, /a/b/c/d/e/, and want to go to /a/b/c/d/, we could just jump one level back. But we have to start at the root /
+find a, find b, find c, and finally d all over again.
 
+we need a way to negivate back to parent level from any directory. 
+create a new dir entry: {to_parent_dir_file_name: parent_dir_inode_number}
+and we want this back point works in every directory, so we set it as default, auto created when new dir created.
+and the hardcode "to_parent_dir_file_name" as ".."
+root directory have ".." as well, it points to itself, at inode # 2
+
+we call this dir from one dir point to another dir, a hard link.
+and the parent directory, in its inode records i_links_count increased by 1 
+
+also If I'm deep in the drectory tree, /a/b/c/d/e/file.txt, I would like to open this file directly, without walk down the tree from root.
+so we also need to default hard link to self referencing 
+this dir entry 
+{self_dir_file_name: self_dir_inode_number}
+we also hardcoded it as "."
+
+we can also use hard link to create nickname for a file
+also symbolic link(softlink) can be used to jump around dir
+
+
+And this system we created is called file system. 
 
 
 
