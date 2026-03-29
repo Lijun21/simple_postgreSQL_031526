@@ -1,3 +1,13 @@
+# file system 
+
+At the the end of this session, you'll understand the concept of: superblock, group descripter table, inode table, inode bitmap, block bitmap, data block, Single Indirect Block, Double and Triple Indirect Blocks, root directory, subdirectory, self dir, parent dir, hard link, symbolic link(soft link), file, and file system. 
+
+(how disk work internally check part 2, we assume its an large array for now.)
+
+
+
+----
+
 
 Given a large empty array, size 1MB, we call this a disk.
 We also have array of bytes, we call this a file.
@@ -142,6 +152,7 @@ Now we can record large files, and not wasting space in the disk.
 ```
 
 (what if file is super large? modern use ext4_extent_header, node in a b-tree ... revisit in the future)
+(ex4 introduced store in "cluster" concept, 1G file takes large amount of blocks, reduce the overhead, introduced cluster in file system.)
 
 
 ## How to fix the performance degradation issue?
@@ -378,7 +389,137 @@ we also hardcoded it as "."
 we can also use hard link to create nickname for a file.
 Symbolic links (soft links) can be used to jump around directories.
 
+
+
+
+# how our disk look like:
+block 0: boot block (or unused)
+block 1: superblock (always at byte offset 1024)
+block 2: GDT  ← right after superblock
+block 3+: inode table, block bitmap, data blocks...
+
+
+```
+Block Group 0:
+  - superblock (primary copy)
+  - GDT (primary copy)
+  - block bitmap
+  - inode bitmap
+  - inode table
+  - data blocks
+
+Block Group 1:
+  - superblock (backup copy, in some ext configs)
+  - GDT (backup copy)
+  - block bitmap
+  - inode bitmap
+  - inode table
+  - data blocks
+
+```
+Each block group is self-contained with its own inode table and data blocks. The GDT in block group 0 is your single authoritative map that tells you where each group's inode table lives. Then you jump directly to the right group's inode table to find your inode 
+
+superblock, GDT, block bitmap, inode bitmap, inode table
+all fixed entry fixed size, fixed order, store in raw bits.
+can be accessed like an array use offset. 
+file name or dir name can not be stored in inode table, because we have no control of its length, they can only be store in data blocks. 
+
+
+
+# how do we to read files now 
+given file path with file name
+```
+/doc/blogs/blog2.txt
+```
+go to root dir at inode #2, hardcoded
+to find inode 2, frist find superblock, hardcoded at disk byte 1024, size 1024 bytes, we can find it instantly. Each record is fix sized, fixed order, we can read each value directly by scan raw bytes.
+
+```
+From superblock we get:
+inodes_count (Total inode count, 4 bytes)
+blocks_count (Total block count, 4 bytes)
+free_blocks_count (Free block count, 4 bytes)
+free_inodes_count (Free inode count, 4 bytes)
+first_data_block (This must be at least 1 for 1k-block filesystems and is typically 0 for all other block sizes.)
+log_block_size (Block size is 2 ^ (10 + log_block_size))
+blocks_per_group (Blocks per group.)
+inodes_per_group (Inodes per group.)
+...
+total 1024 bytes
+```
+
+understand first_data_block:
+if block size if 1024 bytes, 
+disk[0] to disk[1023] bytes, holds file to boot computer.
+disk[1024] byte holds superblock, if block size is 1024 bytes, disk[1024] is completely filled, group descripter table block chain, right next to superblock, what being called the frist data block will be starting at the next block disk[1025]
+if block size is greater than 1024 bytes, disk[1024] can hold not only superblock, also GDT.
+
+once GDT location is known, can scan the chain of GDT for inode number, once find inode number, can get block numbers for the file.
+
+like all directory, root dir doesn't store file name directly
+inode# 2 stores metadata point to data blocks, in those data blocks contain a directory entry table - a list of (file name->inode number) mappings.
+
+```
+inode 2(root /)
+file_type: directory 
+persmission, owner, timestamps
+pointers: 22 (data block numbers)
+
+data block 22:
+file_name         inode number
+.                 2 (itself)
+..                2 (parent dir)
+doc               47 (sub directory)
+etc               83 (sub directory)
+home              91 (sub directory)
+
+inode 47
+file_type: directory 
+persmission, owner, timestamps
+pointers: 25 (data block numbers)
+
+data block 25:
+file_name         inode number
+.                 47 (itself)
+..                2 (parent dir)
+blogs             102 (sub directory)
+
+inode 102
+file_type: directory 
+persmission, owner, timestamps
+pointers: 34
+
+data block 34 (contain dir table, file_name to inode nubmer mappings):
+file_name         inode number
+.                 102 (itself)
+..                47 (parent dir)
+blog1.txt         112 
+blog2.txt         209 
+blog3.txt         216 
+blog4.txt         215 
+
+inode 209
+file_type: file 
+persmission, owner, timestamps
+pointers: 79 (data block number)
+
+data block 79 (contain binary file content):
+01010101010100101010101001000000110100011100101010100
+01010101010100101010101001000000110100011100101010100
+01010101010100101010101001000000110100011100101010100
+
+```
+(do i need to go to superblock, group descripter, find inode_table, then its number 2 record?)
+search in all files in root, look for dir = "doc"
+then go to "doc" inode number 
+
+
+
+
 > This system we designed is called a **file system**.
+
+
+
 
 
 
@@ -392,6 +533,9 @@ the block size can be set and reset on a new disk => format disk, reformat disk,
 mkfs.ext4 -b 4096 /dev/sda1   # format with 4KB blocks
 mkfs.ext4 -b 1024 /dev/sda1   # format with 1KB blocks
 ```
+why each block size is the same? why not random size?
+why inode table each record have same size?
+fixed size makes random access possible, variable size forces sequentical acceess. 
 
 what if I store many many tiny files in the disk, what would happen? 
 inodes blocks are limited
